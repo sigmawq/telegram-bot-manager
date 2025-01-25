@@ -58,6 +58,9 @@ func main() {
 			panic(err)
 		}
 	}
+	{ // Initialize handlers
+		RegisterBotHandler(HANDLER_ID_CRINGE_BOT, CringeBotHandler)
+	}
 
 	{ // Initialize listeners
 		tx, err := ef.WriteTx(&state.EfContext)
@@ -82,12 +85,8 @@ func main() {
 		}
 
 		for _, id := range botsToStart {
-			_StartBot(id)
+			_StartBot(id, true)
 		}
-	}
-
-	{ // Initialize handlers
-		RegisterBotHandler(HANDLER_ID_CRINGE_BOT, CringeBotHandler)
 	}
 
 	{ // Initialize server

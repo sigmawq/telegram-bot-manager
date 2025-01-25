@@ -14,5 +14,6 @@ func CringeBotHandler(listener *Listener) {
 				Text:   responseText,
 			}
 		}
+	default:
 	}
 }

@@ -92,6 +92,8 @@ func RegisterBotHandler(id HandlerID, procedure func(*Listener)) {
 		log.Printf("-> %v", id)
 		panic("HandlerID already in use!")
 	}
+
+	state.BotHandlers[id] = procedure
 }
 
 type StartBotRequest struct {
@@ -100,10 +102,12 @@ type StartBotRequest struct {
 }
 
 func StartBot(ctx *ef.RequestContext, request StartBotRequest) (problem ef.Problem) {
-	return _StartBot(request.BotID)
+	return _StartBot(request.BotID, false)
 }
 
-func _StartBot(BotID ef.ID128) (problem ef.Problem) {
+func _StartBot(BotID ef.ID128, firstStart bool) (problem ef.Problem) {
+	log.Printf("try start bot %v", BotID)
+
 	bot, err := ef.GetByID[Bot](&state.EfContext, BUCKET_BOTS, BotID)
 	if err != nil {
 		problem.ErrorID = ef.ERROR_INTERNAL
@@ -115,7 +119,7 @@ func _StartBot(BotID ef.ID128) (problem ef.Problem) {
 		return
 	}
 
-	if bot.Listen { // Bot is already running so it's fine
+	if bot.Listen && !firstStart { // Bot is already running so it's fine
 		return
 	}
 
@@ -127,6 +131,8 @@ func _StartBot(BotID ef.ID128) (problem ef.Problem) {
 	state.Listeners = append(state.Listeners, &Listener{
 		BotID:         bot.ID,
 		UserOperation: state.BotHandlers[bot.HandlerID],
+		In:            make(chan []TelegramUpdate, 10000),
+		Out:           make(chan TelegramSendMessage, 10000),
 	})
 	listener := state.Listeners[len(state.Listeners)-1]
 	go BotReceiver(listener)

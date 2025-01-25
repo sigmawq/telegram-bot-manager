@@ -69,7 +69,7 @@ func BotReceiver(listener *Listener) {
 			continue
 		}
 
-		maxRps := 1 // TODO: Change
+		maxRps := 30
 		minimumDelayMs := int(1000 / maxRps)
 		sinceLastCall := int(time.Now().Sub(lastTelegramCall).Milliseconds())
 		if sinceLastCall < minimumDelayMs {
@@ -82,6 +82,10 @@ func BotReceiver(listener *Listener) {
 		if err != nil {
 			log.Println(err)
 			continue
+		}
+		if response.StatusCode != 200 {
+			body, _ := io.ReadAll(response.Body)
+			log.Printf("getUpdates failed: status_code:%v body:%v", response.StatusCode, string(body))
 		}
 
 		type Updates struct {
@@ -96,13 +100,14 @@ func BotReceiver(listener *Listener) {
 			log.Printf("%#v", update)
 			lastUpdateID = update.UpdateID + 1
 		}
+		listener.In <- updates.Result
+
 	}
 }
 
 func BotSender(listener *Listener) {
 	log.Printf("[sender] Start BotID %v sender", listener.BotID)
 
-	var lastUpdateID int
 	var lastTelegramCall time.Time
 	for {
 		if listener.NeedsToStop {
@@ -116,7 +121,7 @@ func BotSender(listener *Listener) {
 			continue
 		}
 
-		maxRps := 1
+		maxRps := 30
 		minimumDelayMs := int(1000 / maxRps)
 		sinceLastCall := int(time.Now().Sub(lastTelegramCall).Milliseconds())
 		if sinceLastCall < minimumDelayMs {
@@ -127,15 +132,14 @@ func BotSender(listener *Listener) {
 		var ok bool
 		select {
 		case message, ok = <-listener.Out:
-			if !ok {
-				continue
-			}
 		default:
-			
+		}
+		if !ok {
+			continue
 		}
 
 		requestBody, _ := json.Marshal(message)
-		requestString := fmt.Sprintf("https://api.telegram.org/bot%v/sendMessage", bot.APIKey, lastUpdateID)
+		requestString := fmt.Sprintf("https://api.telegram.org/bot%v/sendMessage", bot.APIKey)
 		response, err := http.Post(requestString, "application/json", strings.NewReader(string(requestBody)))
 		lastTelegramCall = time.Now()
 		if err != nil {
@@ -145,7 +149,7 @@ func BotSender(listener *Listener) {
 
 		if response.StatusCode != 200 {
 			body, _ := io.ReadAll(response.Body)
-			log.Println("[Bot %v] Failed to send message: status_code:%v reason:%v", bot.ID, response.StatusCode, string(body))
+			log.Printf("[Bot %v] Failed to send message: status_code:%v reason:%v message:%v", bot.ID, response.StatusCode, string(body), message)
 		}
 	}
 }
@@ -155,6 +159,7 @@ func BotUserOperationRunner(listener *Listener) {
 		log.Printf("[user operations runner] No user handler for bot id %v", listener.BotID)
 		return
 	}
+	log.Printf("[user operations runner] begin bot id %v", listener.BotID)
 
 	var lastCall time.Time
 	for {
