@@ -14,8 +14,10 @@ func Authorization(ctx *ef.RequestContext, w http.ResponseWriter, r *http.Reques
 var state struct {
 	EfContext ef.Context
 
-	Listeners      []Listener
+	Listeners      []*Listener
 	ListenersMutex sync.Mutex
+
+	BotHandlers map[HandlerID]func(*Listener)
 }
 
 const (
@@ -23,9 +25,12 @@ const (
 )
 
 const (
-	ERROR_ID_WRONG_INPUT     = "tgb_wrong_input"
-	ERROR_BOT_NOT_FOUND      = "tgb_bot_not_found"
-	ERROR_BOT_ALREADY_ACTIVE = "tgb_bot_already_active"
+	ERROR_ID_WRONG_INPUT        = "tgb_wrong_input"
+	ERROR_BOT_NOT_FOUND         = "tgb_bot_not_found"
+	ERROR_BOT_ALREADY_ACTIVE    = "tgb_bot_already_active"
+	ERROR_BOT_HANDLER_NOT_FOUND = "tgb_bot_handler_not_found"
+	ERROR_BOT_LISTENS           = "tgb_bot_listens"
+	ERROR_HANDLER_IS_EMPTY      = "tgb_handler_is_empty"
 )
 
 func main() {
@@ -41,6 +46,10 @@ func main() {
 	if err != nil {
 		log.Println("Error while initializing EF:", err)
 		return
+	}
+
+	{ // Basic initialization
+		state.BotHandlers = make(map[HandlerID]func(*Listener))
 	}
 
 	{ // Initialize database
@@ -60,22 +69,25 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		ef.Iterate(bucket, func(_ ef.ID128, bot *Bot) bool {
-			if bot.Listen {
-				state.Listeners = append(state.Listeners, Listener{BotID: bot.ID})
-			}
 
+		botsToStart := make([]ef.ID128, 0)
+		ef.Iterate(bucket, func(id ef.ID128, _ *Bot) bool {
+			botsToStart = append(botsToStart, id)
 			return true
 		})
-
-		for i, _ := range state.Listeners {
-			go BotReceiver(&state.Listeners[i])
-		}
 
 		err = tx.Commit()
 		if err != nil {
 			panic(err)
 		}
+
+		for _, id := range botsToStart {
+			_StartBot(id)
+		}
+	}
+
+	{ // Initialize handlers
+		RegisterBotHandler(HANDLER_ID_CRINGE_BOT, CringeBotHandler)
 	}
 
 	{ // Initialize server
@@ -88,6 +100,18 @@ func main() {
 		ef.NewRPC(&state.EfContext, ef.NewRPCParams{
 			Name:                  "bot/start",
 			Handler:               StartBot,
+			AuthorizationRequired: true,
+		})
+
+		ef.NewRPC(&state.EfContext, ef.NewRPCParams{
+			Name:                  "bot/stop",
+			Handler:               StopBot,
+			AuthorizationRequired: true,
+		})
+
+		ef.NewRPC(&state.EfContext, ef.NewRPCParams{
+			Name:                  "bot/setHandler",
+			Handler:               SetBotHandler,
 			AuthorizationRequired: true,
 		})
 
